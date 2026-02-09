@@ -1,127 +1,82 @@
-const {
-  default: makeWASocket,
+import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason
-} = require("@whiskeysockets/baileys");
+} from "@whiskeysockets/baileys";
 
-const qrcode = require("qrcode-terminal");
-const moment = require("moment-timezone");
+import P from "pino";
+import readline from "readline";
 
-const OWNER_NUMBER = "233248503631@s.whatsapp.net"; // change later
-
-function log(text) {
-  console.log(`[${new Date().toLocaleTimeString()}] ${text}`);
-}
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
 
 async function startBot() {
-  try {
-    const { state, saveCreds } = await useMultiFileAuthState("session");
+  const { state, saveCreds } = await useMultiFileAuthState("session");
 
-    const sock = makeWASocket({
-      auth: state,
-      printQRInTerminal: true,
-      connectTimeoutMs: 60_000
-    });
+  const sock = makeWASocket({
+    auth: state,
+    logger: P({ level: "silent" }),
+    printQRInTerminal: false,
+    browser: ["Ubuntu", "Chrome", "22.04"]
+  });
 
-    sock.ev.on("creds.update", saveCreds);
+  // Save session automatically
+  sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", (update) => {
-      try {
-        const { connection, qr, lastDisconnect } = update;
-
-        if (qr) {
-          log("Scan QR code below:");
-          qrcode.generate(qr, { small: true });
+  // Ask for phone number and generate pairing code
+  if (!sock.authState.creds.registered) {
+    rl.question(
+      "Enter WhatsApp number with country code (e.g. 233XXXXXXXXX): ",
+      async (number) => {
+        try {
+          const code = await sock.requestPairingCode(number.trim());
+          console.log("\n🔐 PAIRING CODE:", code);
+          console.log("👉 Open WhatsApp → Linked Devices → Link with phone number\n");
+          rl.close();
+        } catch (err) {
+          console.error("❌ Failed to get pairing code:", err.message);
+          process.exit(1);
         }
-
-        if (connection === "open") {
-          log("Bot connected successfully ✅");
-        }
-
-        if (connection === "close") {
-          const code =
-            lastDisconnect?.error?.output?.statusCode;
-
-          log("Connection closed ❌");
-
-          if (code !== DisconnectReason.loggedOut) {
-            log("Reconnecting...");
-            startBot();
-          } else {
-            log("Logged out. Scan QR again.");
-          }
-        }
-      } catch (err) {
-        log("Connection error: " + err.message);
       }
-    });
-
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-      try {
-        const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
-
-        const from = msg.key.remoteJid;
-        const sender = msg.key.participant || from;
-
-        const text =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          "";
-
-        if (!text.startsWith(".")) return;
-
-        const cmd = text.trim().toLowerCase();
-
-        if (cmd === ".ping") {
-          await sock.sendMessage(from, { text: "🏓 Pong!" });
-        }
-
-        if (cmd === ".menu") {
-          await sock.sendMessage(from, {
-            text:
-              "🤖 *Bot Menu*\n\n" +
-              ".ping\n" +
-              ".menu\n" +
-              ".time\n" +
-              ".date\n" +
-              ".alive\n" +
-              ".owner"
-          });
-        }
-
-        if (cmd === ".time") {
-          const time = moment().tz("Africa/Accra").format("HH:mm:ss");
-          await sock.sendMessage(from, { text: `⏰ Time: ${time}` });
-        }
-
-        if (cmd === ".date") {
-          const date = moment().tz("Africa/Accra").format("dddd, DD MMM YYYY");
-          await sock.sendMessage(from, { text: `📅 Date: ${date}` });
-        }
-
-        if (cmd === ".alive") {
-          await sock.sendMessage(from, { text: "✅ Bot is running." });
-        }
-
-        if (cmd === ".owner") {
-          await sock.sendMessage(from, { text: "👑 Owner: NeverHide" });
-        }
-
-        if (cmd === ".restart" && sender === OWNER_NUMBER) {
-          await sock.sendMessage(from, { text: "♻️ Restarting bot..." });
-          process.exit(0);
-        }
-
-      } catch (err) {
-        log("Message error: " + err.message);
-      }
-    });
-
-  } catch (err) {
-    log("Startup failed: " + err.message);
-    setTimeout(startBot, 5000);
+    );
   }
+
+  // Connection handler
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect } = update;
+
+    if (connection === "open") {
+      console.log("✅ WhatsApp connected successfully");
+    }
+
+    if (connection === "close") {
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      console.log("⚠️ Connection closed. Reconnecting...");
+
+      if (reason !== DisconnectReason.loggedOut) {
+        startBot();
+      } else {
+        console.log("❌ Logged out. Delete session folder and restart.");
+      }
+    }
+  });
+
+  // Message listener (basic command)
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
+
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text;
+
+    if (text === ".ping") {
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: "🏓 Pong! Bot is alive."
+      });
+    }
+  });
 }
 
 startBot();
