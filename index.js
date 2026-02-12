@@ -4,7 +4,7 @@ const fs = require('fs');
 const http = require('http');
 
 // 👇👇 ENTER FRIEND'S NUMBER HERE (No +) 👇👇
-const targetNumber = "233XXXXXXXXX"; 
+const targetNumber = "233599931348"; 
 
 // --- 🌐 MINI-WEBSITE TO SHOW THE CODE 🌐 ---
 let currentPairingCode = "Waiting...";
