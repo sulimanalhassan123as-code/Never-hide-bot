@@ -5,7 +5,7 @@ module.exports = {
     
     // ⚠️ IMPORTANT: CHANGE THIS NUMBER TO SWITCH OWNERS
     // format: 233XXXXXXXXX (No + sign)
-    ownerNumber: "233248503631", 
+    ownerNumber: "233599931348", 
     
     // true = Pairing Code (Easy), false = QR Code (Scan)
     usePairingCode: true,
