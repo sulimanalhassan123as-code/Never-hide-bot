@@ -1,82 +1,115 @@
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason
-} from "@whiskeysockets/baileys";
-
-import P from "pino";
-import readline from "readline";
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whisky-sockets/baileys');
+const pino = require('pino');
+const fs = require('fs');
+const axios = require('axios'); // For fetching data
+const config = require('./config'); // Load your settings
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("session");
+    console.log(`🟢 BOOTING UP: ${config.botName}...`);
 
-  const sock = makeWASocket({
-    auth: state,
-    logger: P({ level: "silent" }),
-    printQRInTerminal: false,
-    browser: ["Ubuntu", "Chrome", "22.04"]
-  });
+    // 1. Session Cleaner (Fixes the "Looping" error)
+    if (fs.existsSync('auth_info') && !fs.existsSync('auth_info/creds.json')) {
+        console.log("🧹 Cleaning corrupted session...");
+        fs.rmSync('auth_info', { recursive: true, force: true });
+    }
 
-  // Save session automatically
-  sock.ev.on("creds.update", saveCreds);
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-  // Ask for phone number and generate pairing code
-  if (!sock.authState.creds.registered) {
-    rl.question(
-      "Enter WhatsApp number with country code (e.g. 233XXXXXXXXX): ",
-      async (number) => {
-        try {
-          const code = await sock.requestPairingCode(number.trim());
-          console.log("\n🔐 PAIRING CODE:", code);
-          console.log("👉 Open WhatsApp → Linked Devices → Link with phone number\n");
-          rl.close();
-        } catch (err) {
-          console.error("❌ Failed to get pairing code:", err.message);
-          process.exit(1);
+    // 2. Create the Bot Client
+    const sock = makeWASocket({
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: !config.usePairingCode,
+        auth: state,
+        browser: ["Ubuntu", "Chrome", "20.0.04"], // Looks like a Linux Server
+        markOnlineOnConnect: true
+    });
+
+    // 3. Pairing Code Logic
+    if (config.usePairingCode && !sock.authState.creds.me && !sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                const num = config.ownerNumber.replace(/[^0-9]/g, '');
+                const code = await sock.requestPairingCode(num);
+                console.log(`\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`);
+                console.log(`💬 PAIRING CODE: ${code?.match(/.{1,4}/g)?.join("-")}`);
+                console.log(`▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n`);
+            } catch (err) {
+                console.log("⚠️ Error generating code. Check config.js number!");
+            }
+        }, 3000);
+    }
+
+    // 4. Connection Monitoring
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const reason = (lastDisconnect?.error)?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("🔄 Reconnecting...");
+                startBot();
+            } else {
+                console.log("⛔ Logged out. Delete 'auth_info' folder to restart.");
+            }
+        } else if (connection === 'open') {
+            console.log(`✅ ${config.botName} IS ONLINE AND READY!`);
         }
-      }
-    );
-  }
+    });
 
-  // Connection handler
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect } = update;
+    sock.ev.on('creds.update', saveCreds);
 
-    if (connection === "open") {
-      console.log("✅ WhatsApp connected successfully");
-    }
+    // 5. The Brain (Command Handler)
+    sock.ev.on('messages.upsert', async (m) => {
+        try {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.fromMe) return;
 
-    if (connection === "close") {
-      const reason = lastDisconnect?.error?.output?.statusCode;
-      console.log("⚠️ Connection closed. Reconnecting...");
+            const from = msg.key.remoteJid;
+            const type = Object.keys(msg.message)[0];
+            const body = (type === 'conversation') ? msg.message.conversation :
+                         (type === 'extendedTextMessage') ? msg.message.extendedTextMessage.text : '';
 
-      if (reason !== DisconnectReason.loggedOut) {
-        startBot();
-      } else {
-        console.log("❌ Logged out. Delete session folder and restart.");
-      }
-    }
-  });
+            if (body.startsWith(config.prefix)) {
+                const command = body.slice(1).trim().split(' ')[0].toLowerCase();
+                
+                switch (command) {
+                    case 'menu':
+                        await sock.sendMessage(from, { text: 
+`*🤖 ${config.botName.toUpperCase()}*
+👑 Owner: ${config.ownerName}
 
-  // Message listener (basic command)
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
+*📋 Commands:*
+${config.prefix}ping - Check bot speed
+${config.prefix}joke - Get a random joke
+${config.prefix}quote - Get an inspiring quote
+${config.prefix}kick - (Reply to user) Kick from group`
+                        });
+                        break;
 
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text;
-
-    if (text === ".ping") {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "🏓 Pong! Bot is alive."
-      });
-    }
-  });
+                    case 'ping':
+                        await sock.sendMessage(from, { text: 'Pong! 🏓 Speed: Fast' });
+                        break;
+                    
+                    case 'joke':
+                        // Fetch a joke from the internet
+                        try {
+                           const res = await axios.get('https://v2.jokeapi.dev/joke/Any?type=single');
+                           await sock.sendMessage(from, { text: `😂 *Joke:*\n${res.data.joke}` });
+                        } catch (e) { sock.sendMessage(from, { text: 'No jokes right now!' }); }
+                        break;
+                    
+                    case 'quote':
+                        // Fetch a quote
+                        try {
+                           const res = await axios.get('https://api.quotable.io/random');
+                           await sock.sendMessage(from, { text: `💡 *Quote:*\n"${res.data.content}"\n- ${res.data.author}` });
+                        } catch (e) { sock.sendMessage(from, { text: 'No quotes available.' }); }
+                        break;
+                }
+            }
+        } catch (err) {
+            console.log(err);
+        }
+    });
 }
 
 startBot();
