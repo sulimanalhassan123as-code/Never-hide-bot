@@ -4,7 +4,7 @@ module.exports = {
     ownerName: "Suleiman",
     
     // ✅ VERIFIED PHONE NUMBER
-    ownerNumber: "233599931348", 
+    ownerNumber: "233257671651", 
     
     // Command prefix (e.g., !ping)
     prefix: "!"
