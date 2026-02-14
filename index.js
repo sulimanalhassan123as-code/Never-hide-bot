@@ -4,33 +4,29 @@ const fs = require('fs');
 const http = require('http');
 const config = require('./config');
 
-// 🌐 1. RENDER REQUIRED WEB SERVER 🌐
-// Render will shut down the bot if it doesn't detect a server on this port.
+// --- 🌐 RENDER SERVER ---
 const PORT = process.env.PORT || 3000;
 let currentPairingCode = "Waiting for code...";
-let botStatus = "Booting up...";
 
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(`
         <html style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h2>Status: ${botStatus}</h2>
-            <h3>Your Pairing Code:</h3>
+            <h2>WhatsApp Bot Server</h2>
             <div style="font-size: 40px; font-weight: bold; background: #eee; padding: 20px; display: inline-block;">
                 ${currentPairingCode}
             </div>
-            <p>Refresh this page to update the code.</p>
         </html>
     `);
 });
-server.listen(PORT, () => console.log(`🌐 Render Health Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
-// 🤖 2. THE BOT ENGINE 🤖
+// --- 🤖 BOT MEMORY ---
+let currentBotName = config.botName; 
+
 async function startBot() {
-    botStatus = "Starting Bot Engine...";
-    console.log(`🟢 STARTING: ${config.botName}...`);
+    console.log(`🟢 STARTING ENGINE: ${currentBotName}...`);
 
-    // Clean broken sessions
     if (fs.existsSync('auth_info') && !fs.existsSync('auth_info/creds.json')) {
         fs.rmSync('auth_info', { recursive: true, force: true });
     }
@@ -41,69 +37,186 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         auth: state,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: ["Mac OS", "Safari", "10.15.7"], 
         markOnlineOnConnect: true
     });
 
-    // Generate Pairing Code
     if (!sock.authState.creds.me && !sock.authState.creds.registered) {
-        botStatus = "Generating Pairing Code...";
         setTimeout(async () => {
             try {
                 const num = config.ownerNumber.replace(/[^0-9]/g, '');
                 const code = await sock.requestPairingCode(num);
-                const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;
-                
-                currentPairingCode = formattedCode;
-                botStatus = "Waiting for you to enter code in WhatsApp...";
-                
-                console.log(`\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`);
-                console.log(`💬 YOUR PAIRING CODE: ${formattedCode}`);
-                console.log(`▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n`);
+                currentPairingCode = code?.match(/.{1,4}/g)?.join("-") || code;
+                console.log(`\n✅ SEND THIS CODE TO YOUR FRIEND: ${currentPairingCode}\n`);
             } catch (err) {
-                console.log("⚠️ Error generating code. Check config.js number!");
+                console.log("⚠️ Error generating code.");
             }
         }, 3000);
     }
 
-    // Connection Monitor
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = (lastDisconnect?.error)?.output?.statusCode;
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("🔄 Reconnecting...");
-                botStatus = "Reconnecting...";
                 startBot();
             } else {
-                console.log("⛔ Logged out. Delete 'auth_info' to restart.");
-                botStatus = "Logged Out.";
+                console.log("⛔ Logged out.");
             }
         } else if (connection === 'open') {
-            console.log(`✅ BOT IS ONLINE!`);
+            console.log(`✅ BOT CONNECTED TO WHATSAPP!`);
             currentPairingCode = "Connected! ✅";
-            botStatus = "Online and Ready!";
         }
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Simple Command Listener
+    // --- 📱 MEGA MENU & COMMANDS ---
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
             if (!msg.message || msg.key.fromMe) return;
 
             const from = msg.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
             const type = Object.keys(msg.message)[0];
             const body = (type === 'conversation') ? msg.message.conversation :
                          (type === 'extendedTextMessage') ? msg.message.extendedTextMessage.text : '';
 
-            if (body.toLowerCase() === `${config.prefix}ping`) {
-                await sock.sendMessage(from, { text: 'Pong! 🏓 Bot is alive on Render.' });
+            const senderName = msg.pushName || "User";
+
+            if (body.startsWith(config.prefix)) {
+                const args = body.slice(config.prefix.length).trim().split(' ');
+                const command = args.shift().toLowerCase();
+                const textArg = args.join(" ");
+
+                switch (command) {
+                    case 'menu':
+                        const menuText = `
+╔════ 🤖 *${currentBotName.toUpperCase()}* ════╗
+║ 👋 Hello, *${senderName}*!
+║ 👑 Developer: *${config.ownerName}*
+╚════════════════════════╝
+
+*🛠️ MAIN TOOLS*
+▸ *${config.prefix}setname [name]* - Rename the bot
+▸ *${config.prefix}ping* - Check speed
+▸ *${config.prefix}info* - Bot information
+
+*👥 GROUP COMMANDS (Admins)*
+▸ *${config.prefix}hidetag [text]* - Notify all silently
+▸ *${config.prefix}kick @user* - Remove someone
+▸ *${config.prefix}promote @user* - Make admin
+▸ *${config.prefix}demote @user* - Remove admin
+▸ *${config.prefix}groupinfo* - Group details
+
+*🎮 FUN MENU*
+▸ *${config.prefix}joke* - Random joke
+▸ *${config.prefix}fact* - Random fact
+▸ *${config.prefix}flip* - Flip a coin
+▸ *${config.prefix}roll* - Roll a dice
+`;
+                        await sock.sendMessage(from, { text: menuText.trim() });
+                        break;
+
+                    case 'setname':
+                        if (!textArg) return await sock.sendMessage(from, { text: `❌ Provide a name! Example: *${config.prefix}setname AlphaBot*` });
+                        currentBotName = textArg;
+                        await sock.sendMessage(from, { text: `✅ My name is now: *${currentBotName}*` });
+                        break;
+
+                    case 'ping':
+                        await sock.sendMessage(from, { text: `Pong! 🏓\nBot is running perfectly.` });
+                        break;
+
+                    case 'info':
+                        await sock.sendMessage(from, { text: `ℹ️ *Bot Info*\nDeployed by: ${config.ownerName}\nCurrent Name: ${currentBotName}\nStatus: Online 🟢` });
+                        break;
+
+                    // --- GROUP COMMANDS ---
+                    case 'hidetag':
+                        if (!isGroup) return await sock.sendMessage(from, { text: `❌ This command only works in groups!` });
+                        try {
+                            const groupMetadata = await sock.groupMetadata(from);
+                            const participants = groupMetadata.participants;
+                            const allJids = participants.map(p => p.id);
+                            await sock.sendMessage(from, { text: textArg || "📢 Attention everyone!", mentions: allJids });
+                        } catch (err) {
+                            await sock.sendMessage(from, { text: `❌ I need to be an admin to do this.` });
+                        }
+                        break;
+
+                    case 'kick':
+                        if (!isGroup) return await sock.sendMessage(from, { text: `❌ This command only works in groups!` });
+                        const userToKick = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                        if (!userToKick) return await sock.sendMessage(from, { text: `❌ Please mention the user. Example: *${config.prefix}kick @user*` });
+                        try {
+                            await sock.groupParticipantsUpdate(from, [userToKick], "remove");
+                            await sock.sendMessage(from, { text: `✅ User successfully kicked.` });
+                        } catch (err) {
+                            await sock.sendMessage(from, { text: `❌ I cannot kick them. Make sure I am a group admin!` });
+                        }
+                        break;
+
+                    case 'promote':
+                        if (!isGroup) return await sock.sendMessage(from, { text: `❌ This command only works in groups!` });
+                        const userToPromote = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                        if (!userToPromote) return await sock.sendMessage(from, { text: `❌ Please mention the user.` });
+                        try {
+                            await sock.groupParticipantsUpdate(from, [userToPromote], "promote");
+                            await sock.sendMessage(from, { text: `✅ User promoted to Admin.` });
+                        } catch (err) {
+                            await sock.sendMessage(from, { text: `❌ Make sure I am an admin first!` });
+                        }
+                        break;
+
+                    case 'demote':
+                        if (!isGroup) return await sock.sendMessage(from, { text: `❌ This command only works in groups!` });
+                        const userToDemote = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                        if (!userToDemote) return await sock.sendMessage(from, { text: `❌ Please mention the user.` });
+                        try {
+                            await sock.groupParticipantsUpdate(from, [userToDemote], "demote");
+                            await sock.sendMessage(from, { text: `✅ User demoted to regular member.` });
+                        } catch (err) {
+                            await sock.sendMessage(from, { text: `❌ Make sure I am an admin first!` });
+                        }
+                        break;
+
+                    case 'groupinfo':
+                        if (!isGroup) return await sock.sendMessage(from, { text: `❌ This command only works in groups!` });
+                        try {
+                            const groupMeta = await sock.groupMetadata(from);
+                            const infoText = `*Group Name:* ${groupMeta.subject}\n*Members:* ${groupMeta.participants.length}\n*Owner:* @${groupMeta.owner?.split('@')[0] || 'Unknown'}`;
+                            await sock.sendMessage(from, { text: infoText, mentions: [groupMeta.owner] });
+                        } catch (err) {
+                            await sock.sendMessage(from, { text: `❌ Error fetching group info.` });
+                        }
+                        break;
+
+                    // --- FUN COMMANDS ---
+                    case 'joke':
+                        const jokes = ["Why do programmers prefer dark mode? Because light attracts bugs. 🐛", "I invented a new word! Plagiarism! 😂"];
+                        await sock.sendMessage(from, { text: jokes[Math.floor(Math.random() * jokes.length)] });
+                        break;
+
+                    case 'fact':
+                        const facts = ["Water makes up about 71% of the Earth's surface. 🌍", "A day on Venus is longer than a year on Venus. 🪐"];
+                        await sock.sendMessage(from, { text: facts[Math.floor(Math.random() * facts.length)] });
+                        break;
+
+                    case 'flip':
+                        const coin = Math.random() < 0.5 ? "Heads" : "Tails";
+                        await sock.sendMessage(from, { text: `🪙 You flipped a coin... Result: *${coin}*!` });
+                        break;
+
+                    case 'roll':
+                        const dice = Math.floor(Math.random() * 6) + 1;
+                        await sock.sendMessage(from, { text: `🎲 You rolled a dice and got: *${dice}*` });
+                        break;
+                }
             }
         } catch (err) {
-            console.log(err);
+            console.log("Message Error:", err);
         }
     });
 }
