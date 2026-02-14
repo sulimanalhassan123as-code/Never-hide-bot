@@ -28,11 +28,16 @@ let currentBotName = config.botName;
 async function startBot() {
     console.log(`🟢 STARTING ENGINE: ${currentBotName}...`);
 
-    // 🔥 THE ULTIMATE BYPASS: Using a brand new folder name
     const sessionFolder = 'bot_session';
 
-    if (fs.existsSync(sessionFolder) && !fs.existsSync(`${sessionFolder}/creds.json`)) {
+    // 1. CLEANUP: If folder exists, delete it to start fresh
+    if (fs.existsSync(sessionFolder)) {
         fs.rmSync(sessionFolder, { recursive: true, force: true });
+    }
+
+    // 2. CRITICAL FIX: Create the folder immediately so the file has a place to go
+    if (!fs.existsSync(sessionFolder)) {
+        fs.mkdirSync(sessionFolder);
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
