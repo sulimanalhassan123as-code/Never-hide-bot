@@ -76,4 +76,140 @@ async function startBot() {
                 console.log("==============================\n");
 
             } catch (err) {
-                console.log("❌ Error generating pairing code:",
+                console.log("❌ Error generating pairing code:", err.message);
+            }
+        }, 4000);
+    }
+
+
+    // ================================
+    // 🔌 CONNECTION EVENTS
+    // ================================
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+
+            console.log("⚠️ Connection closed. Reason:", reason);
+
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("🔄 Reconnecting...");
+                startBot();
+            } else {
+                console.log("❌ Logged out from WhatsApp.");
+            }
+
+        } else if (connection === 'open') {
+            console.log("✅ BOT CONNECTED SUCCESSFULLY!");
+            currentPairingCode = "Connected ✅";
+        }
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+
+    // ================================
+    // 📩 MESSAGE HANDLER
+    // ================================
+    sock.ev.on('messages.upsert', async (m) => {
+        try {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.fromMe) return;
+
+            const from = msg.key.remoteJid;
+            const isGroup = from.endsWith('@g.us');
+
+            const type = Object.keys(msg.message)[0];
+            const body =
+                type === 'conversation'
+                    ? msg.message.conversation
+                    : type === 'extendedTextMessage'
+                    ? msg.message.extendedTextMessage.text
+                    : '';
+
+            const senderName = msg.pushName || "User";
+
+            if (!body.startsWith(config.prefix)) return;
+
+            const args = body.slice(config.prefix.length).trim().split(' ');
+            const command = args.shift().toLowerCase();
+            const textArg = args.join(" ");
+
+            switch (command) {
+
+                case 'ping':
+                    await sock.sendMessage(from, { text: "🏓 Pong! Bot is alive." });
+                    break;
+
+                case 'menu':
+                    await sock.sendMessage(from, {
+                        text: `
+🤖 *${config.botName}*
+
+👋 Hello ${senderName}
+
+*Commands*
+${config.prefix}ping
+${config.prefix}info
+${config.prefix}joke
+${config.prefix}fact
+${config.prefix}flip
+${config.prefix}roll
+                        `
+                    });
+                    break;
+
+                case 'info':
+                    await sock.sendMessage(from, {
+                        text: `
+Bot Name: ${config.botName}
+Owner: ${config.ownerName}
+Status: Online 🟢
+                        `
+                    });
+                    break;
+
+                case 'joke':
+                    const jokes = [
+                        "Why do programmers prefer dark mode? Because light attracts bugs 😂",
+                        "I invented a word! Plagiarism 🤣"
+                    ];
+                    await sock.sendMessage(from, {
+                        text: jokes[Math.floor(Math.random() * jokes.length)]
+                    });
+                    break;
+
+                case 'fact':
+                    const facts = [
+                        "Water covers 71% of Earth 🌍",
+                        "Venus day is longer than its year 🪐"
+                    ];
+                    await sock.sendMessage(from, {
+                        text: facts[Math.floor(Math.random() * facts.length)]
+                    });
+                    break;
+
+                case 'flip':
+                    await sock.sendMessage(from, {
+                        text: Math.random() < 0.5 ? "🪙 Heads!" : "🪙 Tails!"
+                    });
+                    break;
+
+                case 'roll':
+                    await sock.sendMessage(from, {
+                        text: `🎲 You rolled: ${Math.floor(Math.random() * 6) + 1}`
+                    });
+                    break;
+
+                default:
+                    await sock.sendMessage(from, { text: "❌ Unknown command." });
+            }
+
+        } catch (err) {
+            console.log("Message error:", err.message);
+        }
+    });
+}
+
+startBot();
