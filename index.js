@@ -16,6 +16,7 @@ const server = http.createServer((req, res) => {
             <div style="font-size: 40px; font-weight: bold; background: #eee; padding: 20px; display: inline-block;">
                 ${currentPairingCode}
             </div>
+            <p>Refresh this page to see the latest code.</p>
         </html>
     `);
 });
@@ -56,15 +57,26 @@ async function startBot() {
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
+        
         if (connection === 'close') {
             const reason = (lastDisconnect?.error)?.output?.statusCode;
             console.log(`⚠️ Connection Closed! Reason code: ${reason}`);
             
-            if (reason !== DisconnectReason.loggedOut) {
+            // --- THE 405 SELF-HEALING FIX ---
+            if (reason === 405) {
+                console.log("🧹 Error 405 detected! Auto-cleaning corrupted memory...");
+                fs.rmSync('auth_info', { recursive: true, force: true });
+                console.log("🔄 Restarting fresh in 5 seconds...");
+                setTimeout(startBot, 5000);
+            } 
+            else if (reason !== DisconnectReason.loggedOut) {
                 console.log("🔄 Reconnecting in 5 seconds to prevent crash loop...");
-                setTimeout(startBot, 5000); // <-- THE SAFETY BRAKE
-            } else {
-                console.log("⛔ Logged out.");
+                setTimeout(startBot, 5000);
+            } 
+            else {
+                console.log("⛔ Logged out. Wiping old memory...");
+                fs.rmSync('auth_info', { recursive: true, force: true });
+                setTimeout(startBot, 5000);
             }
         } else if (connection === 'open') {
             console.log(`✅ BOT CONNECTED TO WHATSAPP!`);
