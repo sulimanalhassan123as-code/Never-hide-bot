@@ -28,11 +28,14 @@ let currentBotName = config.botName;
 async function startBot() {
     console.log(`🟢 STARTING ENGINE: ${currentBotName}...`);
 
-    if (fs.existsSync('auth_info') && !fs.existsSync('auth_info/creds.json')) {
-        fs.rmSync('auth_info', { recursive: true, force: true });
+    // 🔥 THE ULTIMATE BYPASS: Using a brand new folder name
+    const sessionFolder = 'bot_session';
+
+    if (fs.existsSync(sessionFolder) && !fs.existsSync(`${sessionFolder}/creds.json`)) {
+        fs.rmSync(sessionFolder, { recursive: true, force: true });
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
@@ -62,20 +65,19 @@ async function startBot() {
             const reason = (lastDisconnect?.error)?.output?.statusCode;
             console.log(`⚠️ Connection Closed! Reason code: ${reason}`);
             
-            // --- THE 405 SELF-HEALING FIX ---
             if (reason === 405) {
-                console.log("🧹 Error 405 detected! Auto-cleaning corrupted memory...");
-                fs.rmSync('auth_info', { recursive: true, force: true });
+                console.log("🧹 Error 405 detected! Wiping memory safely...");
+                try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch(e) {}
                 console.log("🔄 Restarting fresh in 5 seconds...");
                 setTimeout(startBot, 5000);
             } 
             else if (reason !== DisconnectReason.loggedOut) {
-                console.log("🔄 Reconnecting in 5 seconds to prevent crash loop...");
+                console.log("🔄 Reconnecting in 5 seconds...");
                 setTimeout(startBot, 5000);
             } 
             else {
                 console.log("⛔ Logged out. Wiping old memory...");
-                fs.rmSync('auth_info', { recursive: true, force: true });
+                try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch(e) {}
                 setTimeout(startBot, 5000);
             }
         } else if (connection === 'open') {
