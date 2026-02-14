@@ -1,215 +1,135 @@
-const crypto = require("crypto");
-global.crypto = crypto;
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason 
-} = require('@whiskeysockets/baileys');
-
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
 const http = require('http');
 const config = require('./config');
+const crypto = require('crypto'); // Fix crypto error
 
-
-// ================================
-// 🌐 RENDER WEB SERVER
-// ================================
+// 🌐 Render web page
 const PORT = process.env.PORT || 3000;
 let currentPairingCode = "Waiting for code...";
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
+const server = http.createServer((req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/html'});
     res.end(`
         <html style="font-family:sans-serif;text-align:center;padding-top:50px;">
-            <h2>WhatsApp Bot Server</h2>
+            <h2>NeverHide WhatsApp Bot</h2>
             <div style="font-size:40px;font-weight:bold;background:#eee;padding:20px;display:inline-block;">
                 ${currentPairingCode}
             </div>
-            <p>Refresh page to see latest status.</p>
+            <p>Refresh this page to see updates</p>
         </html>
     `);
 });
+server.listen(PORT,()=>console.log(`🌐 Web server running on port ${PORT}`));
 
-server.listen(PORT, () => {
-    console.log(`🌐 Web server running on port ${PORT}`);
-});
+// Bot variables
+let currentBotName = config.botName;
 
-
-// ================================
-// 🤖 BOT START FUNCTION
-// ================================
-async function startBot() {
-
-    console.log(`🟢 Starting Bot: ${config.botName}`);
-
-    const sessionFolder = './bot_session';
-
-    // Only create if not exists (DO NOT DELETE SESSION)
-    if (!fs.existsSync(sessionFolder)) {
-        fs.mkdirSync(sessionFolder);
-    }
+// Start the bot
+async function startBot(){
+    console.log(`🟢 Starting: ${currentBotName}...`);
+    const sessionFolder = 'bot_session';
+    if(!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-
     const sock = makeWASocket({
-        logger: pino({ level: 'silent' }),
+        logger: pino({level:'silent'}),
         printQRInTerminal: false,
         auth: state,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: ["NeverHide", "Bot", "1.0"],
         markOnlineOnConnect: true
     });
 
-
-    // ================================
-    // 🔑 PAIRING CODE
-    // ================================
-    if (!state.creds.registered) {
-        setTimeout(async () => {
-            try {
-                const phoneNumber = config.ownerNumber.replace(/[^0-9]/g, '');
-                const code = await sock.requestPairingCode(phoneNumber);
-
-                currentPairingCode = code?.match(/.{1,4}/g)?.join("-") || code;
-
-                console.log("\n==============================");
-                console.log("📲 PAIRING CODE:");
-                console.log(currentPairingCode);
-                console.log("==============================\n");
-
-            } catch (err) {
-                console.log("❌ Error generating pairing code:", err.message);
-            }
-        }, 4000);
-    }
-
-
-    // ================================
-    // 🔌 CONNECTION EVENTS
-    // ================================
-    sock.ev.on('connection.update', (update) => {
+    // Connection handling
+    sock.ev.on('connection.update',(update)=>{
         const { connection, lastDisconnect } = update;
-
-        if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-
-            console.log("⚠️ Connection closed. Reason:", reason);
-
-            if (reason !== DisconnectReason.loggedOut) {
-                console.log("🔄 Reconnecting...");
-                startBot();
-            } else {
-                console.log("❌ Logged out from WhatsApp.");
-            }
-
-        } else if (connection === 'open') {
-            console.log("✅ BOT CONNECTED SUCCESSFULLY!");
-            currentPairingCode = "Connected ✅";
+        if(connection==='close'){
+            const reason = (lastDisconnect?.error)?.output?.statusCode;
+            console.log(`⚠️ Connection Closed! Reason: ${reason||"Unknown"}`);
+            setTimeout(startBot,5000); // auto-reconnect
+        } else if(connection==='open'){
+            console.log("✅ BOT CONNECTED TO WHATSAPP!");
+            currentPairingCode = "Connected! ✅";
         }
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update',saveCreds);
 
-
-    // ================================
-    // 📩 MESSAGE HANDLER
-    // ================================
-    sock.ev.on('messages.upsert', async (m) => {
-        try {
+    // Message handler
+    sock.ev.on('messages.upsert', async (m)=>{
+        try{
             const msg = m.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+            if(!msg.message || msg.key.fromMe) return;
 
             const from = msg.key.remoteJid;
             const isGroup = from.endsWith('@g.us');
-
             const type = Object.keys(msg.message)[0];
-            const body =
-                type === 'conversation'
-                    ? msg.message.conversation
-                    : type === 'extendedTextMessage'
-                    ? msg.message.extendedTextMessage.text
-                    : '';
-
+            const body = (type==='conversation') ? msg.message.conversation :
+                         (type==='extendedTextMessage') ? msg.message.extendedTextMessage.text : '';
             const senderName = msg.pushName || "User";
 
-            if (!body.startsWith(config.prefix)) return;
+            if(!body.startsWith(config.prefix)) return;
 
             const args = body.slice(config.prefix.length).trim().split(' ');
             const command = args.shift().toLowerCase();
-            const textArg = args.join(" ");
+            const textArg = args.join(' ');
 
-            switch (command) {
+            // Menu template
+            const menuText = `
+╔════ 🤖 *${currentBotName.toUpperCase()}* ════╗
+║ 👋 Hello, *${senderName}*!
+║ 👑 Developer: *${config.ownerName}*
+╚════════════════════════╝
 
-                case 'ping':
-                    await sock.sendMessage(from, { text: "🏓 Pong! Bot is alive." });
+*🛠️ TOOLS*
+▸ *${config.prefix}setname [name]* - Rename bot
+▸ *${config.prefix}ping* - Check speed
+▸ *${config.prefix}info* - Bot info
+
+*👥 GROUP COMMANDS*
+▸ *${config.prefix}hidetag [text]* - Notify all
+▸ *${config.prefix}kick @user* - Remove
+▸ *${config.prefix}promote @user* - Admin
+▸ *${config.prefix}demote @user* - Remove admin
+▸ *${config.prefix}groupinfo* - Group details
+
+*🎮 FUN*
+▸ *${config.prefix}joke* - Random joke
+▸ *${config.prefix}fact* - Random fact
+▸ *${config.prefix}flip* - Coin flip
+▸ *${config.prefix}roll* - Dice roll
+▸ *${config.prefix}rps [rock|paper|scissors]* - Play game
+`;
+
+            switch(command){
+                case 'menu': await sock.sendMessage(from,{text:menuText}); break;
+                case 'setname':
+                    if(!textArg) return await sock.sendMessage(from,{text:`❌ Example: *${config.prefix}setname AlphaBot*`});
+                    currentBotName = textArg;
+                    await sock.sendMessage(from,{text:`✅ Name changed to *${currentBotName}*`});
                     break;
-
-                case 'menu':
-                    await sock.sendMessage(from, {
-                        text: `
-🤖 *${config.botName}*
-
-👋 Hello ${senderName}
-
-*Commands*
-${config.prefix}ping
-${config.prefix}info
-${config.prefix}joke
-${config.prefix}fact
-${config.prefix}flip
-${config.prefix}roll
-                        `
-                    });
-                    break;
-
-                case 'info':
-                    await sock.sendMessage(from, {
-                        text: `
-Bot Name: ${config.botName}
-Owner: ${config.ownerName}
-Status: Online 🟢
-                        `
-                    });
-                    break;
-
+                case 'ping': await sock.sendMessage(from,{text:'Pong! 🏓 Bot running perfectly.'}); break;
+                case 'info': await sock.sendMessage(from,{text:`ℹ️ Bot Info\nDeveloper: ${config.ownerName}\nName: ${currentBotName}\nStatus: Online 🟢`}); break;
                 case 'joke':
-                    const jokes = [
-                        "Why do programmers prefer dark mode? Because light attracts bugs 😂",
-                        "I invented a word! Plagiarism 🤣"
-                    ];
-                    await sock.sendMessage(from, {
-                        text: jokes[Math.floor(Math.random() * jokes.length)]
-                    });
-                    break;
-
+                    const jokes = ["Why programmers prefer dark mode? Light attracts bugs. 🐛","I invented a new word! Plagiarism! 😂"];
+                    await sock.sendMessage(from,{text:jokes[Math.floor(Math.random()*jokes.length)]}); break;
                 case 'fact':
-                    const facts = [
-                        "Water covers 71% of Earth 🌍",
-                        "Venus day is longer than its year 🪐"
-                    ];
-                    await sock.sendMessage(from, {
-                        text: facts[Math.floor(Math.random() * facts.length)]
-                    });
-                    break;
-
+                    const facts = ["Water covers 71% of Earth's surface 🌍","Sun rises in east, sets in west 🌅"];
+                    await sock.sendMessage(from,{text:facts[Math.floor(Math.random()*facts.length)]}); break;
                 case 'flip':
-                    await sock.sendMessage(from, {
-                        text: Math.random() < 0.5 ? "🪙 Heads!" : "🪙 Tails!"
-                    });
-                    break;
-
+                    await sock.sendMessage(from,{text:`🪙 Coin: *${Math.random()<0.5?"Heads":"Tails"}*`}); break;
                 case 'roll':
-                    await sock.sendMessage(from, {
-                        text: `🎲 You rolled: ${Math.floor(Math.random() * 6) + 1}`
-                    });
-                    break;
-
-                default:
-                    await sock.sendMessage(from, { text: "❌ Unknown command." });
+                    await sock.sendMessage(from,{text:`🎲 Dice: *${Math.floor(Math.random()*6)+1}*`}); break;
+                case 'rps':
+                    if(!textArg) return await sock.sendMessage(from,{text:"❌ Choose rock, paper, or scissors"});
+                    const choices=['rock','paper','scissors'];
+                    const botChoice=choices[Math.floor(Math.random()*3)];
+                    const result=(textArg===botChoice)?"Draw!":(textArg==='rock'&&botChoice==='scissors')||(textArg==='paper'&&botChoice==='rock')||(textArg==='scissors'&&botChoice==='paper')?"You win!":"Bot wins!";
+                    await sock.sendMessage(from,{text:`🎮 You: ${textArg}\n🤖 Bot: ${botChoice}\nResult: ${result}`}); break;
             }
-
-        } catch (err) {
-            console.log("Message error:", err.message);
+        } catch(err){
+            console.log("Message Error:",err);
         }
     });
 }
