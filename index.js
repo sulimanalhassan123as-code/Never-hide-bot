@@ -49,7 +49,7 @@ async function startBot() {
                 currentPairingCode = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log(`\n✅ SEND THIS CODE TO YOUR FRIEND: ${currentPairingCode}\n`);
             } catch (err) {
-                console.log("⚠️ Error generating code.");
+                console.log("⚠️ Error generating code. Please check config.js");
             }
         }, 3000);
     }
@@ -58,8 +58,11 @@ async function startBot() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const reason = (lastDisconnect?.error)?.output?.statusCode;
+            console.log(`⚠️ Connection Closed! Reason code: ${reason}`);
+            
             if (reason !== DisconnectReason.loggedOut) {
-                startBot();
+                console.log("🔄 Reconnecting in 5 seconds to prevent crash loop...");
+                setTimeout(startBot, 5000); // <-- THE SAFETY BRAKE
             } else {
                 console.log("⛔ Logged out.");
             }
