@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+global.crypto = crypto;
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
