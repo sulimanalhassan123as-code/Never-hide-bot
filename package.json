@@ -1,12 +1,12 @@
 {
-  "name": "neverhide-bot",
+  "name": "whatsapp-group-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
+    "@whiskeysockets/baileys": "latest",
     "pino": "^8.0.0"
   }
 }
