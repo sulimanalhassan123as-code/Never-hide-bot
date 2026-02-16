@@ -1,6 +1,9 @@
+require("dotenv").config();
+
 module.exports = {
-  BOT_NAME: "NEVER HIDE SUPER BOT",
-  PREFIX: ".",
-  OWNER_NUMBER: "233599931348",
-  AI_STYLE: "mix"
+  prefix: process.env.PREFIX || ".",
+  botName: process.env.BOT_NAME || "NEVER HIDE SUPER BOT",
+  aiApiUrl: process.env.AI_API_URL,
+  aiApiKey: process.env.AI_API_KEY,
+  sessionName: process.env.SESSION_NAME || "session",
 };
