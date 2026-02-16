@@ -1,101 +1,164 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const fs = require('fs');
-const http = require('http');
-const config = require('./config');
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion
+} = require("@whiskeysockets/baileys");
 
-// --- 🌐 ALWAYSDATA SERVER SETUP ---
-// Alwaysdata requires specific IP binding
+const pino = require("pino");
+const fs = require("fs");
+const http = require("http");
+const config = require("./config");
+
+// =============================
+// 🌐 SERVER SETUP (Alwaysdata)
+// =============================
+
 const PORT = process.env.PORT || 8100;
-const IP = process.env.IP || '0.0.0.0'; 
+const IP = process.env.IP || "0.0.0.0";
 
-let currentPairingCode = "Waiting for code...";
-let codeRequested = false; 
+let currentPairingCode = "Waiting for pairing...";
+let codeRequested = false;
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
+http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`
-        <html style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h2>Alwaysdata Bot Server</h2>
-            <div style="font-size: 40px; font-weight: bold; background: #eee; padding: 20px; display: inline-block;">
+        <html style="font-family:sans-serif;text-align:center;padding-top:50px;">
+            <h2>NeverHide Bot Server</h2>
+            <div style="font-size:40px;font-weight:bold;background:#eee;padding:20px;display:inline-block;">
                 ${currentPairingCode}
             </div>
-            <p>Status: Running on Persistent Storage ✅</p>
+            <p>Status: Persistent Storage Active ✅</p>
         </html>
     `);
+}).listen(PORT, IP, () => {
+    console.log(`🌐 Server running on ${IP}:${PORT}`);
 });
 
-// IMPORTANT: Bind to the specific IP Alwaysdata provides
-server.listen(PORT, IP, () => console.log(`🌐 Server running on ${IP}:${PORT}`));
+// =============================
+// 🤖 BOT ENGINE
+// =============================
 
-let currentBotName = config.botName; 
+let sock;
 
 async function startBot() {
-    console.log(`🟢 STARTING ENGINE...`);
-    
-    const sessionFolder = 'bot_session';
-    if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
+    console.log("🟢 Starting Bot Engine...");
+
+    const sessionFolder = "./bot_session";
+    if (!fs.existsSync(sessionFolder)) {
+        fs.mkdirSync(sessionFolder);
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+    const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: true, // Enabled QR just in case we need it later
+    sock = makeWASocket({
+        version,
+        logger: pino({ level: "silent" }),
+        printQRInTerminal: false,
         auth: state,
-        browser: ["Ubuntu", "Chrome", "20.0.04"], 
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
         markOnlineOnConnect: true
     });
 
-    if (!sock.authState.creds.registered && !codeRequested) {
-        codeRequested = true; 
+    // =============================
+    // 🔐 PAIRING CODE (ONLY ONCE)
+    // =============================
+
+    if (!state.creds.registered && !codeRequested) {
+        codeRequested = true;
+
         setTimeout(async () => {
             try {
-                const num = config.ownerNumber.replace(/[^0-9]/g, '');
+                const num = config.ownerNumber.replace(/\D/g, "");
                 const code = await sock.requestPairingCode(num);
                 currentPairingCode = code?.match(/.{1,4}/g)?.join("-") || code;
-                console.log(`\n✅ PAIRING CODE: ${currentPairingCode}\n`);
+                console.log("✅ Pairing Code:", currentPairingCode);
             } catch (err) {
-                console.log("⚠️ Error generating code", err);
-                codeRequested = false; 
+                console.log("❌ Pairing error:", err.message);
+                codeRequested = false;
             }
         }, 3000);
     }
 
-    sock.ev.on('connection.update', (update) => {
+    // =============================
+    // 🔄 CONNECTION HANDLER
+    // =============================
+
+    sock.ev.on("connection.update", (update) => {
         const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const reason = (lastDisconnect?.error)?.output?.statusCode;
-            console.log(`⚠️ Connection Closed: ${reason}`);
-            
-            // On Alwaysdata, we DO NOT wipe memory on 401/515 immediately
-            // We want to preserve the session if possible.
-            // Only wipe if you are manually resetting.
-            if (reason === 401) {
-                console.log("Session invalid. Delete bot_session folder to re-pair.");
+
+        if (connection === "open") {
+            console.log("✅ Connected to WhatsApp!");
+            currentPairingCode = "Connected ✅";
+        }
+
+        if (connection === "close") {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+
+            console.log("⚠️ Connection closed. Reason:", reason);
+
+            if (reason === DisconnectReason.loggedOut) {
+                console.log("⛔ Logged out. Delete bot_session folder to re-pair.");
+                return;
             }
-            setTimeout(startBot, 5000);
-        } else if (connection === 'open') {
-            console.log(`✅ BOT CONNECTED!`);
-            currentPairingCode = "Connected! ✅";
+
+            console.log("🔄 Reconnecting in 5 seconds...");
+            setTimeout(() => {
+                if (sock) sock.end();
+                startBot();
+            }, 5000);
         }
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on('messages.upsert', async (m) => {
+    // =============================
+    // 💬 BASIC COMMAND SYSTEM
+    // =============================
+
+    sock.ev.on("messages.upsert", async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message) return;
-            // ... (Rest of your command logic goes here) ...
-            // (I kept the previous logic abbreviated to save space, 
-            // but you can paste your full command block here)
+            if (!msg.message || msg.key.fromMe) return;
+
             const from = msg.key.remoteJid;
-            const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-            
-            if (body === ".menu") {
-                 await sock.sendMessage(from, { text: "✅ Bot is alive on Alwaysdata!" });
+            const body =
+                msg.message.conversation ||
+                msg.message.extendedTextMessage?.text ||
+                "";
+
+            if (!body.startsWith(config.prefix)) return;
+
+            const command = body.slice(1).trim().toLowerCase();
+
+            if (command === "menu") {
+                await sock.sendMessage(from, {
+                    text: `
+╔═══ 🤖 NEVER HIDE BOT ═══╗
+║ Developer: NEVER HIDE
+╚══════════════════════╝
+
+✨ Commands:
+!menu  - Show menu
+!ping  - Test speed
+!alive - Check status
+                    `
+                });
             }
-        } catch (err) { }
+
+            if (command === "ping") {
+                await sock.sendMessage(from, { text: "🏓 Pong!" });
+            }
+
+            if (command === "alive") {
+                await sock.sendMessage(from, { text: "✅ Bot is alive and stable." });
+            }
+
+        } catch (err) {
+            console.log("Message Error:", err.message);
+        }
     });
 }
+
 startBot();
