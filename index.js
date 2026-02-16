@@ -1,26 +1,26 @@
-require("dotenv").config();
-const startConnection = require("./core/connection");
-const commandHandler = require("./core/commandHandler");
+const { commands } = require("./core/commandHandler");
 const { getText, reply } = require("./core/utils");
+const venom = require("venom-bot"); // Or your WhatsApp client
 
-async function main() {
-  const sock = await startConnection();
+venom
+  .create("session")
+  .then((client) => {
+    client.onMessage(async (msg) => {
+      const text = getText(msg);
+      if (!text.startsWith(".")) return; // Only commands with prefix
 
-  // Listen to messages
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
+      const args = text.slice(1).trim().split(/ +/);
+      const cmdName = args.shift().toLowerCase();
 
-    // Ignore system messages
-    if (!msg.message || msg.key.fromMe) return;
+      const command = commands.get(cmdName);
+      if (!command) return;
 
-    // Get the text
-    const text = getText(msg);
-
-    if (!text) return;
-
-    // Pass message to command handler
-    await commandHandler(sock, msg, text);
-  });
-}
-
-main().catch(console.error);
+      try {
+        await command.execute(client, msg, args);
+      } catch (err) {
+        console.error(err);
+        await reply(client, msg, "❌ Error running this command.");
+      }
+    });
+  })
+  .catch((err) => console.error(err));
