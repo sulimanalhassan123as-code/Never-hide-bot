@@ -1,57 +1,26 @@
 require("dotenv").config();
+const startConnection = require("./core/connection");
+const commandHandler = require("./core/commandHandler");
+const { getText, reply } = require("./core/utils");
 
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason
-} = require("@whiskeysockets/baileys");
+async function main() {
+  const sock = await startConnection();
 
-const P = require("pino");
-const qrcode = require("qrcode-terminal");
-const config = require("./config");
-const { handleCommand } = require("./core/commandHandler");
-
-async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("session");
-
-  const sock = makeWASocket({
-    logger: P({ level: "silent" }),
-    auth: state,
-    browser: ["NeverHide", "Chrome", "1.0"]
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log("\n📲 Scan this QR:\n");
-      qrcode.generate(qr, { small: true });
-    }
-
-    if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !==
-        DisconnectReason.loggedOut;
-
-      console.log("⚠️ Connection closed. Reconnecting...");
-      if (shouldReconnect) startBot();
-    } else if (connection === "open") {
-      console.log(`✅ ${config.BOT_NAME} Connected`);
-    }
-  });
-
+  // Listen to messages
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
+
+    // Ignore system messages
     if (!msg.message || msg.key.fromMe) return;
 
-    try {
-      await handleCommand(sock, msg);
-    } catch (err) {
-      console.log("Command error:", err.message);
-    }
+    // Get the text
+    const text = getText(msg);
+
+    if (!text) return;
+
+    // Pass message to command handler
+    await commandHandler(sock, msg, text);
   });
 }
 
-startBot();
+main().catch(console.error);
