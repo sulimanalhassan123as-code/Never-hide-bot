@@ -1,26 +1,29 @@
-const { commands } = require("./core/commandHandler");
-const { getText, reply } = require("./core/utils");
-const venom = require("venom-bot"); // Or your WhatsApp client
+const venom = require('venom-bot'); // Or baileys if you use that
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-venom
-  .create("session")
-  .then((client) => {
-    client.onMessage(async (msg) => {
-      const text = getText(msg);
-      if (!text.startsWith(".")) return; // Only commands with prefix
+// --- WhatsApp Bot Setup ---
+venom.create('neverhide-session', {
+    useChrome: false, // optional: faster headless mode
+    session: 'neverhide-session',
+    multidevice: true,
+})
+.then((client) => {
+    console.log('🚀 NeverHide SuperBot started!');
 
-      const args = text.slice(1).trim().split(/ +/);
-      const cmdName = args.shift().toLowerCase();
-
-      const command = commands.get(cmdName);
-      if (!command) return;
-
-      try {
-        await command.execute(client, msg, args);
-      } catch (err) {
-        console.error(err);
-        await reply(client, msg, "❌ Error running this command.");
-      }
+    // Example AI command / simple reply
+    client.onMessage((message) => {
+        if (message.body.toLowerCase() === 'hi') {
+            client.sendText(message.from, 'Hello from NeverHide SuperBot! 🤖');
+        }
     });
-  })
-  .catch((err) => console.error(err));
+})
+.catch((err) => console.error(err));
+
+// --- Express listener to satisfy Render ---
+app.get('/', (req, res) => {
+    res.send('NeverHide SuperBot is running ✅');
+});
+
+app.listen(PORT, () => console.log(`Web listener active on port ${PORT}`));
