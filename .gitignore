@@ -1,2 +1,12 @@
 node_modules/
-bot_session/
+.env
+.env.local
+session/
+*.log
+.DS_Store
+dist/
+build/
+.vscode/
+.idea/
+*.swp
+*.swo
