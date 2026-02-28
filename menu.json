@@ -1,0 +1,1 @@
+{\n  "menu": [\n    {\n      "title": "Home",\n      "action": "goToHome()"\n    },\n    {\n      "title": "Profile",\n      "action": "viewProfile()"\n    },\n    {\n      "title": "Settings",\n      "action": "openSettings()"\n    },\n    {\n      "title": "Help",\n      "action": "getHelp()"\n    }\n  ],\n  "dynamicUpdate": true\n}
